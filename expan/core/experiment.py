@@ -5,7 +5,11 @@ import numpy as np
 import pandas as pd
 import copy
 
-import expan.core.early_stopping as es
+from typing import List, Union, Dict, Optional, Tuple
+
+from pyspark.sql import functions as F, DataFrame
+from pyspark.sql.types import IntegerType
+
 import expan.core.statistics as statx
 import expan.core.correction as correction
 from expan.core.statistical_test import *
@@ -18,31 +22,35 @@ DEFAULT_OUTLIER_QUANTILE = 0.99
 
 class Experiment(object):
     """ Class which adds the analysis functions to experimental data. """
-    def __init__(self, metadata):
+    def __init__(self, metadata, error=0.001):
         """
         Constructor of the experiment object.
-        
+
         :param metadata: additional information about the experiment. (e.g. primary KPI, source, etc)
         :type  metadata: dict
         """
-        self.metadata     = metadata
+        self.metadata = metadata
         self.worker_table = {
             'fixed_horizon': statx.make_delta,
-            'group_sequential': es.make_group_sequential,
-            'bayes_factor': es.make_bayes_factor,
-            'bayes_precision': es.make_bayes_precision
         }
+        self.error = error
 
     def __str__(self):
         return 'Performing "{:s}" experiment.'.format(self.metadata['experiment'])
 
 
-    def analyze_statistical_test(self, test, test_method='fixed_horizon', include_data=False, **worker_args):
+    def analyze_statistical_test(
+        self,
+        test: StatisticalTest,
+        test_method='fixed_horizon',
+        include_data=False,
+        **worker_args
+    ):
         """ Runs delta analysis on one statistical test and returns statistical results.
-        
+
         :param test: a statistical test to run
         :type  test: StatisticalTest
-        :param test_method: analysis method to perform. 
+        :param test_method: analysis method to perform.
                            It can be 'fixed_horizon', 'group_sequential', 'bayes_factor' or 'bayes_precision'.
         :type  test_method: str
         :param include_data: True if test results should include data, False - if no data should be included
@@ -124,12 +132,17 @@ class Experiment(object):
         return test_result
 
 
-    def analyze_statistical_test_suite(self, test_suite, test_method='fixed_horizon', **worker_args):
+    def analyze_statistical_test_suite(
+        self,
+        test_suite: StatisticalTestSuite,
+        test_method='fixed_horizon',
+        **worker_args
+    ):
         """ Runs delta analysis on a set of tests and returns statistical results for each statistical test in the suite.
-        
+
         :param test_suite: a suite of statistical test to run
         :type  test_suite: StatisticalTestSuite
-        :param test_method: analysis method to perform. 
+        :param test_method: analysis method to perform.
                            It can be 'fixed_horizon', 'group_sequential', 'bayes_factor' or 'bayes_precision'.
         :type  test_method: str
         :param worker_args: additional arguments for the analysis method (see signatures of corresponding methods)
@@ -140,8 +153,7 @@ class Experiment(object):
         if not isinstance(test_suite, StatisticalTestSuite):
             raise TypeError("Test suite should be of type StatisticalTestSuite.")
 
-        if test_method not in ['fixed_horizon', 'group_sequential']:
-            test_suite.correction_method = CorrectionMethod.NONE
+        test_suite.correction_method = CorrectionMethod.NONE
         requires_correction = test_suite.correction_method is not CorrectionMethod.NONE
 
         # look up table for correction method
@@ -192,12 +204,17 @@ class Experiment(object):
         return test_suite_result
 
 
-    def outlier_filter(self, data, kpis, thresholds=None):
+    def outlier_filter(
+        self,
+        data: Union[pd.DataFrame, DataFrame],
+        kpis: List[KPI],
+        thresholds: Optional[Dict[str, Tuple[str, float]]] = None
+    ):
         """ Method that filters out entities whose KPIs exceed the value at a given percentile.
-        If any of the KPIs exceeds its threshold the entity is filtered out. 
+        If any of the KPIs exceeds its threshold the entity is filtered out.
         If kpis contains derived kpi, this method will first create these columns,
         and then perform outlier filtering on all given kpis.
-        
+
         :param kpis: list of KPI instances
         :type  kpis: list[KPI]
         :param thresholds: dict of thresholds mapping KPI names to (type, percentile) tuples
@@ -218,8 +235,12 @@ class Experiment(object):
                         "Denominator '{}' of the derived KPI does not exist in the data in outlier filtering.".format(kpi.denominator))
                 kpi.make_derived_kpi(data)
 
-        admittable_thresholds = set(['upper', 'lower', 'two-sided',
-                                     'two-sided-asym'])
+        admittable_thresholds = set([
+            'upper',
+            'lower',
+            'two-sided',
+            'two-sided-asym'
+        ])
 
         thresholds = thresholds or {}
         for kpi in thresholds.keys():
@@ -234,22 +255,64 @@ class Experiment(object):
                 raise ValueError("Percentile value needs to be between 0.0 and 100.0!")
 
         # run quantile filtering
-        flags = self._quantile_filtering(data=data,
-                                         kpis=[kpi.name for kpi in kpis],
-                                         thresholds=thresholds)
-        # log which columns were filtered and how many entities were filtered out
-        self.metadata['filtered_columns'] = [kpi.name for kpi in kpis]
-        self.metadata['filtered_entities_number'] = len(flags[flags == True])
+        if isinstance(data, pd.DataFrame):
+            flags = self._quantile_filtering(
+                data=data,
+                kpis=[kpi.name for kpi in kpis],
+                thresholds=thresholds
+            )
+            # log which columns were filtered and how many entities were filtered out
+            self.metadata['filtered_columns'] = [kpi.name for kpi in kpis]
+            self.metadata['filtered_entities_number'] = len(flags[flags == True])
 
-        filtered = [item[1] for item in list(zip(flags, data['variant'])) if item[0] == True]
-        self.metadata['filtered_entities_per_variant'] = dict((val, filtered.count(val)) for val in set(filtered))
+            filtered = [item[1] for item in list(zip(flags, data['variant'])) if item[0] == True]
+            self.metadata['filtered_entities_per_variant'] = dict((val, filtered.count(val)) for val in set(filtered))
 
-        self.metadata['filtered_threshold_kind'] = 'various'
-        # throw warning if too many entities have been filtered out
-        if (len(flags[flags == True]) / float(len(data))) > 0.02:
-            warnings.warn('More than 2% of entities have been filtered out, consider adjusting the percentile value.')
-            logger.warning('More than 2% of entities have been filtered out, consider adjusting the percentile value.')
-        return data[flags == False]
+            self.metadata['filtered_threshold_kind'] = 'various'
+            # throw warning if too many entities have been filtered out
+            if (len(flags[flags == True]) / float(len(data))) > 0.02:
+                warnings.warn(
+                    'More than 2% of entities have been filtered out, consider adjusting the percentile value.')
+                logger.warning(
+                    'More than 2% of entities have been filtered out, consider adjusting the percentile value.')
+            return data[flags == False]
+
+        elif isinstance(data, DataFrame):
+            data = self._pyspark_quantile_filtering(
+                data=data,
+                kpis=[kpi.name for kpi in kpis],
+                thresholds=thresholds
+            )
+
+            # log which columns were filtered and how many entities were filtered out
+            self.metadata['filtered_columns'] = [kpi.name for kpi in kpis]
+            self.metadata['filtered_entities_number'] = data.select(
+                F.col("flags").cast(IntegerType())
+            ).agg({"flags": "sum"}).collect()[0][0]
+
+            self.metadata['filtered_entities_per_variant'] = dict(
+                [(r[0], r[1]) for r in data.select(
+                    F.col("variant"),
+                    F.col("flags").cast(IntegerType())
+                ).groupby("variant").agg({'flags': 'sum'}).collect()]
+            )
+
+            self.metadata['filtered_threshold_kind'] = 'various'
+
+            # throw warning if too many entities have been filtered out
+            if self.metadata['filtered_entities_number'] / data.count():
+                warnings.warn(
+                    'More than 2% of entities have been filtered out, consider adjusting the percentile value.')
+                logger.warning(
+                    'More than 2% of entities have been filtered out, consider adjusting the percentile value.')
+            return data.filter(
+                F.col("flags") == False
+            ).drop("flags")
+
+        else:
+            NotImplementedError(f"data type {type(data)} not supported")
+
+
 
 
     # ----- below are helper methods ----- #
@@ -257,14 +320,14 @@ class Experiment(object):
         """ Check whether the quality of data is good enough to perform analysis. Invalid cases can be:
         1. there is no data
         2. the data does not contain all the variants to perform analysis
-        
+
         :param data: data frame for which a check for validity will be made
         :type  data: DataFrame
         :param test: a statistical test for control name and treatment name
         :type  test: StatisticalTest
-        
+
         :return True if data is valid for analysis and False if not
-        :rtype: bool 
+        :rtype: bool
         """
         count_controls   = sum(data[test.variants.variant_column_name] == test.variants.control_name)
         count_treatments = sum(data[test.variants.variant_column_name] == test.variants.treatment_name)
@@ -292,9 +355,9 @@ class Experiment(object):
 
         from sys import float_info
 
-        """ Make the filtering based on the given quantile level. 
+        """ Make the filtering based on the given quantile level.
         Filtering is performed for each kpi independently.
-        
+
         :param kpis: the kpis to perform filtering
         :type  kpis: list[str]
         :param thresholds: dict of thresholds mapping KPI names to (type, percentile) tuples
@@ -356,6 +419,112 @@ class Experiment(object):
 
         return flags
 
+    def _pyspark_quantile_filtering(
+        self,
+        data: DataFrame,
+        kpis: List[str],
+        thresholds: Dict[str, Tuple[str, float]]
+    ):
+        """ Make the filtering based on the given quantile level.
+        Filtering is performed for each kpi independently.
+
+        :param kpis: the kpis to perform filtering
+        :type  kpis: list[str]
+        :param thresholds: dict of thresholds mapping KPI names to (type, percentile) tuples
+        :type  thresholds: dict
+
+        :return: boolean values indicating whether the row should be filtered
+        :rtype: pd.Series
+        """
+
+        warnings.warn('Only approximated filtering is supported for PySpark DataFrame.')
+        logger.warning('Only approximated filtering is supported for PySpark DataFrame.')
+
+        def find_smallest(data: DataFrame, col_name: str, quantile: float, error: float = 0.01):
+            """ Return boolean vector of data points smaller than given quantile."""
+            threshold, = data.approxQuantile(col_name, [quantile], error)
+            return data.withColumn(
+                "flags", (F.col("flags") | (F.col(col_name) <= threshold))
+            )
+
+        def find_largest(data: DataFrame, col_name: str, quantile: float, error: float = 0.01):
+            """ Return boolean vector of data points larger than given quantile."""
+            threshold, = data.approxQuantile(col_name, [quantile], error)
+            return data.withColumn(
+                "flags", (F.col("flags") | (F.col(col_name) >= threshold))
+            )
+
+        def find_smallest_and_largest(data: DataFrame, col_name: str, quantile: float, error: float = 0.01):
+            """ Return boolean vector of data points outside of the given quantile."""
+            rest = 1.0 - quantile
+            quantiles = [rest/2.0, 1.0 - rest/2.0]
+            low_threshold, high_low_threshold = data.approxQuantile(col_name, quantiles, error)
+            return data.withColumn(
+                "flags",
+                (F.col("flags") | ((F.col(col_name) <= low_threshold) | (F.col(col_name) >= high_low_threshold)))
+            )
+
+        def find_smallest_and_largest_asym(
+            data: DataFrame,
+            col_name: str,
+            quantile: float,
+            error: float = 0.01
+        ):
+            """ Return boolean vector of data to remove such that quantile/2
+                is kept in both non-negative and non-positive subsets
+                of data."""
+            rest = 1.0 - quantile
+
+            neg_threshold, = data.filter(
+                F.col(col_name) < 0
+            ).approxQuantile(col_name, [rest/2.0], error)
+
+            pos_threshold, = data.filter(
+                F.col(col_name) >= 0
+            ).approxQuantile(col_name, [1.0 - rest/2.0], error)
+
+            return data.withColumn(
+                "flags",
+                (F.col("flags") | ((F.col(col_name) < neg_threshold) | (F.col(col_name) > pos_threshold)))
+            )
+
+        data = data.withColumn(
+            "flags", F.lit(False)
+        )
+
+        method_table = {
+            'upper': find_largest,
+            'lower': find_smallest,
+            'two-sided': find_smallest_and_largest,
+            'two-sided-asym': find_smallest_and_largest_asym
+        }
+
+        for col in data[kpis].columns:
+            data = data.withColumn(
+                f"replaced_{col}", F.col(col)
+            ).replace([np.inf, -np.inf], np.nan, subset=[f"replaced_{col}"])
+
+            if col in thresholds:
+                threshold_type, percentile = thresholds[col]
+                quantile = percentile/100.0
+            else:
+                quantile = DEFAULT_OUTLIER_QUANTILE
+                min_ = data.agg({f"replaced_{col}": "min"}).collect()[0][0]
+                max_ = data.agg({f"replaced_{col}": "max"}).collect()[0][0]
+                threshold_type = _get_threshold_type(min_, max_)
+
+            if threshold_type not in method_table:
+                raise ValueError("Unknown outlier filtering method '%s'."%(threshold_type,))
+            else:
+                method = method_table[threshold_type]
+                data = method(
+                    data,
+                    f"replaced_{col}",
+                    quantile,
+                    self.error
+                ).drop(f"replaced_{col}")
+        return data
+
     def run_goodness_of_fit_test(self, observed_freqs, expected_freqs, alpha=0.01, min_counts=5):
         """ Checks the validity of observed and expected counts and runs chi-square test for goodness of fit.
 
@@ -390,12 +559,18 @@ class Experiment(object):
                              "are less than 2.")
         return split_is_unbiased, p_value
 
-def _choose_threshold_type(data):
+def _choose_threshold_type(data) -> str:
     """ Heuristics used to decide what filtering method to use."""
     assert len(data), 'data should be non-empty'
     data = pd.Series(data)
     min, max = data.min(skipna=True), data.max(skipna=True)
+    return _get_threshold_type(min, max)
 
+def _get_threshold_type(
+    min: float,
+    max: float
+) -> str:
+    """ Heuristics used to decide what filtering method to use."""
     if min < 0.0 and max > 0.0:
         return 'two-sided'
     elif max > 0.0:

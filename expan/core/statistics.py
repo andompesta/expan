@@ -26,8 +26,8 @@ def make_delta(assume_normal=True, alpha=0.05, min_observations=20, nruns=10000,
 def delta(x, y, x_denominators=1, y_denominators=1, assume_normal=True, alpha=0.05, min_observations=20, nruns=10000, relative=False):
     """ Calculates the difference of means between the samples in a statistical sense.
     Computation is done in form of treatment minus control, i.e. x-y.
-    Note that NaNs are treated as if they do not exist in the data. 
-    
+    Note that NaNs are treated as if they do not exist in the data.
+
     :param x: sample of the treatment group
     :type  x: pd.Series or array-like
     :param y: sample of the control group
@@ -50,7 +50,7 @@ def delta(x, y, x_denominators=1, y_denominators=1, assume_normal=True, alpha=0.
             mean+ret_val[1]. This is more useful in many situations because it
             corresponds with the sem() and std() functions.
     :type: relative: boolean
-    
+
     :return: results of type SimpleTestStatistics
     :rtype: SimpleTestStatistics
     """
@@ -156,9 +156,11 @@ def delta(x, y, x_denominators=1, y_denominators=1, assume_normal=True, alpha=0.
     statistical_power = compute_statistical_power_from_samples(_x_strange, _y_strange, alpha) # TODO: wrong
 
     logger.info("Delta calculation finished!")
-    return SimpleTestStatistics(variant_statistics.control_statistics,
-                                variant_statistics.treatment_statistics,
-                                float(mu), c_i, p_value, statistical_power)
+    return SimpleTestStatistics(
+        variant_statistics.control_statistics,
+        variant_statistics.treatment_statistics,
+        float(mu), c_i, p_value, statistical_power
+    )
 
 
 def sample_size(x):
@@ -187,9 +189,9 @@ def sample_size(x):
 
 def estimate_sample_size(x, mde, r, alpha=0.05, beta=0.2):
     """
-    Estimates sample size based on sample mean and variance given MDE (Minimum Detectable effect), 
+    Estimates sample size based on sample mean and variance given MDE (Minimum Detectable effect),
     number of variants and variant split ratio
-    
+
     :param x: sample to base estimation on
     :type  x: pd.Series or pd.DataFrame
     :param mde: minimum detectable effect
@@ -200,7 +202,7 @@ def estimate_sample_size(x, mde, r, alpha=0.05, beta=0.2):
     :type  alpha: float
     :param beta: type II error
     :type  beta: float
-    
+
     :return: estimated sample size
     :rtype: float or pd.Series
     """
@@ -218,7 +220,7 @@ def estimate_sample_size(x, mde, r, alpha=0.05, beta=0.2):
 
 def bootstrap(x, y, func=_delta_mean, nruns=10000, percentiles=[2.5, 97.5],
               min_observations=20, return_bootstraps=False, relative=False):
-    """ Bootstraps the Confidence Intervals for a particular function comparing two samples. 
+    """ Bootstraps the Confidence Intervals for a particular function comparing two samples.
     NaNs are ignored (discarded before calculation).
 
     :param x: sample of the treatment group
@@ -226,12 +228,12 @@ def bootstrap(x, y, func=_delta_mean, nruns=10000, percentiles=[2.5, 97.5],
     :param y: sample of the control group
     :type  y: pd.Series or list (array-like)
     :param func: function of which the distribution is to be computed.
-                 The default comparison metric is the difference of means. 
+                 The default comparison metric is the difference of means.
                  For bootstraping correlation: func=lambda x,y: np.stats.pearsonr(x,y)[0].
     :type  func: function
     :param nruns: number of bootstrap runs to perform
     :type  nruns: int
-    :param percentiles: The values corresponding to the given percentiles are returned. 
+    :param percentiles: The values corresponding to the given percentiles are returned.
                         The default percentiles (2.5% and 97.5%) correspond to an alpha of 0.05.
     :type  percentiles: list
     :param min_observations: minimum number of observations necessary
@@ -239,12 +241,12 @@ def bootstrap(x, y, func=_delta_mean, nruns=10000, percentiles=[2.5, 97.5],
     :param return_bootstraps: If this variable is set the bootstrap sets are returned,
                               otherwise the first return value is empty.
     :type  return_bootstraps: bool
-    :param relative: if relative==True, then the values will be returned as distances below and above the mean, 
-                     respectively, rather than the absolute values. 
-                     In this case, the interval is mean-ret_val[0] to mean+ret_val[1]. 
+    :param relative: if relative==True, then the values will be returned as distances below and above the mean,
+                     respectively, rather than the absolute values.
+                     In this case, the interval is mean-ret_val[0] to mean+ret_val[1].
                      This is more useful in many situations because it corresponds with the sem() and std() functions.
     :type  relative: bool
-    
+
     :return (c_val, bootstraps): c_val is a dict which contains percentile levels (index) and values
                                  bootstraps is a np.array containing the bootstrapping results per run
     :rtype: tuple
@@ -282,7 +284,7 @@ def bootstrap(x, y, func=_delta_mean, nruns=10000, percentiles=[2.5, 97.5],
 
 
 def pooled_std(std1, n1, std2, n2):
-    """ Returns the pooled estimate of standard deviation. 
+    """ Returns the pooled estimate of standard deviation.
 
     For further information visit:
         http://sphweb.bumc.bu.edu/otlt/MPH-Modules/BS/BS704_Confidence_Intervals/BS704_Confidence_Intervals5.html
@@ -326,7 +328,7 @@ def normal_sample_difference(x, y, percentiles=[2.5, 97.5], relative=False):
                      mean+ret_val[1]. This is more useful in many situations because it
                      corresponds with the sem() and std() functions.
     :type relative: bool
-    
+
     :return: percentiles and corresponding values
     :rtype: dict
     """
@@ -471,7 +473,7 @@ def normal_difference(mean1, std1, n1, mean2, std2, n2, percentiles=[2.5, 97.5],
                      mean+ret_val[1]. This is more useful in many situations because it
                      corresponds with the sem() and std() functions.
     :type relative: bool
-    
+
     :return: percentiles and corresponding values
     :rtype: dict
     """
@@ -499,7 +501,7 @@ def compute_statistical_power_from_samples(x, y, alpha=0.05):
     :type  y: pd.Series or array-like
     :param alpha: Type I error (false positive rate)
     :type  alpha: float
-    
+
     :return: statistical power---the probability of a test to detect an effect if the effect actually exists
     :rtype: float
     """
@@ -520,7 +522,7 @@ def compute_statistical_power_from_samples(x, y, alpha=0.05):
 
 def compute_statistical_power(mean1, std1, n1, mean2, std2, n2, z_1_minus_alpha):
     """ Compute statistical power given statistics of control and treatment.
-    
+
     :param mean1: mean value of the treatment distribution
     :type  mean1: float
     :param std1: standard deviation of the treatment distribution
@@ -535,8 +537,8 @@ def compute_statistical_power(mean1, std1, n1, mean2, std2, n2, z_1_minus_alpha)
     :type  n2: int
     :param z_1_minus_alpha: critical value for significance level alpha. That is, z-value for 1-alpha.
     :type  z_1_minus_alpha: float
-    
-    :return: statistical power---the probability of a test to detect an effect if the effect actually exists 
+
+    :return: statistical power---the probability of a test to detect an effect if the effect actually exists
                                     or -1 if std is less or equal to 0
     :rtype: float
     """
@@ -566,7 +568,7 @@ def compute_p_value_from_samples(x, y):
     :param y: samples of a control group
     :type  y: pd.Series or array-like
 
-    :return: two-tailed p-value 
+    :return: two-tailed p-value
     :rtype: float
     """
     if x is None or y is None:
@@ -588,7 +590,7 @@ def compute_p_value_from_samples(x, y):
 
 def compute_p_value(mean1, std1, n1, mean2, std2, n2):
     """ Compute two-tailed p value for statistical Student's T-test given statistics of control and treatment.
-    
+
     :param mean1: mean value of the treatment distribution
     :type  mean1: float
     :param std1: standard deviation of the treatment distribution
@@ -601,8 +603,8 @@ def compute_p_value(mean1, std1, n1, mean2, std2, n2):
     :type  std2: float
     :param n2: number of samples of the control distribution
     :type  n2: int
-    
-    :return: two-tailed p-value 
+
+    :return: two-tailed p-value
     :rtype: float
     """
 
@@ -625,13 +627,13 @@ def compute_p_value(mean1, std1, n1, mean2, std2, n2):
 def chi_square(observed_freqs, expected_freqs, ddof=0):
     """ Computes chi-square statistics and p-values given observed and expected frequencies and degrees of freedom.
 
-    :param observed_freqs: observed frequencies 
+    :param observed_freqs: observed frequencies
     :type  observed_freqs: pd.Series or array-like
     :param expected_freqs: expected frequencies
     :type  expected_freqs: pd.Series or array-like
     :param ddof: delta degrees of freedom, 0 by default
     :type  ddof: int
-    
+
     :return: chi-square statistics and p-value
     :rtype:  float, float
     """

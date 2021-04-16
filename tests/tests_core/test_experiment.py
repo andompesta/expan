@@ -4,6 +4,7 @@ import unittest
 import warnings
 
 import numpy as np
+from pyspark.sql import SparkSession
 
 from expan.core.results import CombinedTestStatistics
 from expan.core.statistical_test import *
@@ -41,18 +42,25 @@ class ExperimentTestCase(unittest.TestCase):
         self.test_derived_kpi = StatisticalTest(self.data, self.derived_kpi, [], self.variants)
 
         # small dummy data frame
-        data_dummy = np.array([['index', 'entity', 'variant', 'normal_same', 'normal_shifted'],
-                               [0, 1, 'A', 2.0, 1.0], [1, 2, 'B', 3.0, 2.0],
-                               [2, 3, 'A', 3.0, 2.0], [3, 4, 'B', 2.5, 1.0]])
-        self.data_dummy_df = pd.DataFrame(data=data_dummy[1:, 1:],
-                                          columns=data_dummy[0, 1:]).convert_objects(convert_numeric=True)
+        self.data_dummy_df = pd.DataFrame(
+            dict(
+                entity=[1, 2, 3, 4],
+                variant=["A", "B", "A", "B"],
+                normal_same=[2.0, 3.0, 3.0, 2.5],
+                normal_shifted=[1., 2., 2., 1.]
+            ),
+            index=[0, 1, 2, 3],
+        )
 
-        data_dummy_with_nan = np.array([['index', 'entity', 'variant', 'normal_same', 'normal_shifted'],
-                               [0, 1, 'A', 2.0, 1.0], [1, 2, 'B', 3.0, 2.0],
-                               [2, 3, 'A', 3.0, 2.0], [3, 4, 'B', 2.5, 1.0],
-                               [4, 5, 'A', 0.0, 0.0], [5, 6, 'B', None, None]])
-        self.data_dummy_df_with_nan = pd.DataFrame(data=data_dummy_with_nan[1:, 1:],
-                                                   columns=data_dummy_with_nan[0, 1:]).convert_objects(convert_numeric=True)
+        self.data_dummy_df_with_nan = pd.DataFrame(
+            dict(
+                entity=[1, 2, 3, 4, 5, 6],
+                variant=["A", "B", "A", "B", "A", "B"],
+                normal_same=[2.0, 3.0, 3.0, 2.5, 0., None],
+                normal_shifted=[1., 2., 2., 1., 0., None]
+            ),
+            index=[0, 1, 2, 3, 4, 5],
+        )
 
         # statistical test suite
         self.suite_with_one_test = StatisticalTestSuite([self.test_normal_same])
@@ -69,19 +77,27 @@ class ExperimentTestCase(unittest.TestCase):
         data_dummy_zero_std = np.array([['index', 'entity', 'variant', 'normal_same', 'normal_shifted'],
                                         [0, 1, 'A', 1.0, 1.0], [1, 2, 'B', 2.0, 2.0],
                                         [2, 3, 'A', 1.0, 1.0], [3, 4, 'B', 2.0, 2.0]])
-        self.data_dummy_zero_std = pd.DataFrame(data=data_dummy_zero_std[1:, 1:],
-                                                columns=data_dummy_zero_std[0, 1:]).convert_objects(
-            convert_numeric=True)
+        self.data_dummy_zero_std = pd.DataFrame(
+            dict(
+                entity=[1, 2, 3, 4],
+                variant=["A", "B", "A", "B"],
+                normal_same=[1.0, 2., 1., 2.],
+                normal_shifted=[1., 2., 1., 2.]
+            ),
+            index=[0, 1, 2, 3],
+        )
         self.test_normal_same_zero_std = StatisticalTest(self.data_dummy_zero_std, self.kpi, [], self.variants)
         self.suite_with_one_test_zero_std = StatisticalTestSuite([self.test_normal_same_zero_std])
 
         # small dummy data frames with all nan values
-        self.data_dummy_all_nan = pd.DataFrame({
-                        'entity' : [1,2,3,4],
-                        'variant' : ['A','B','C','D'],
-                        'normal_same' : [np.nan] * 4,
-                        'normal_shifted' : [np.nan] * 4,
-                            })
+        self.data_dummy_all_nan = pd.DataFrame(
+            dict(
+                entity=[1, 2, 3, 4],
+                variant=['A','B','C','D'],
+                normal_same=[np.nan] * 4,
+                normal_shifted=[np.nan] * 4,
+            )
+        )
         self.test_normal_same_nan_data = StatisticalTest(self.data_dummy_all_nan, self.kpi, [], self.variants)
         self.suite_with_one_test_with_nan_data = StatisticalTestSuite([self.test_normal_same_nan_data])
 
@@ -90,7 +106,10 @@ class ExperimentTestCase(unittest.TestCase):
         pass
 
     def getExperiment(self):
-        return Experiment(self.metadata)
+        return Experiment(
+            self.metadata,
+            error=0.
+        )
 
 
 class ExperimentClassTestCases(ExperimentTestCase):
@@ -102,6 +121,7 @@ class ExperimentClassTestCases(ExperimentTestCase):
 
 class StatisticalTestTestCases(ExperimentTestCase):
     """ Test the method analyze_statistical_test. """
+
 
     def test_fixed_horizon(self):
         ndecimals = 5
@@ -189,6 +209,7 @@ class StatisticalTestTestCases(ExperimentTestCase):
 
 class StatisticalTestSuiteTestCases(ExperimentTestCase):
     """ Test the method analyze_statistical_test_suite. """
+
 
     def test_one_test_in_suite(self):
         ndecimals = 5
@@ -287,6 +308,12 @@ class StatisticalTestSuiteTestCases(ExperimentTestCase):
 
 class OutlierFilteringTestCases(ExperimentTestCase):
     """ Test outlier filtering and quantile filtering. """
+    def __init__(self, *ags, **kwargs):
+        super().__init__(*ags, **kwargs)
+        spark = SparkSession.builder.getOrCreate()
+        spark.conf.set("spark.sql.session.timeZone", "UTC")
+        spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
+        self.spark = spark
 
     kpi_names = [
         'normal_same',
@@ -312,9 +339,19 @@ class OutlierFilteringTestCases(ExperimentTestCase):
         exp = self.getExperiment()
         data = exp.outlier_filter(
             self.data,
-            kpis = [KPI(kpi) for kpi in self.kpi_names],
+            kpis=[KPI(kpi) for kpi in self.kpi_names],
         )
         self.assertEqual(len(self.data) - len(data), exp.metadata['filtered_entities_number'])
+        self.assertEqual(exp.metadata['filtered_entities_number'], 389)
+
+    def test_outlier_filtering_automatic_pyspark(self):
+        exp = self.getExperiment()
+        input_data = self.spark.createDataFrame(self.data)
+        data = exp.outlier_filter(
+            input_data,
+            kpis=[KPI(kpi) for kpi in self.kpi_names],
+        )
+        self.assertEqual(len(self.data) - data.count(), exp.metadata['filtered_entities_number'])
         self.assertEqual(exp.metadata['filtered_entities_number'], 389)
 
     def test_outlier_filtering_lower_threshold(self):
@@ -328,10 +365,28 @@ class OutlierFilteringTestCases(ExperimentTestCase):
         self.assertEqual(exp.metadata['filtered_entities_per_variant']['A'], 22)
         self.assertEqual(exp.metadata['filtered_entities_per_variant']['B'], 18)
 
+    def test_outlier_filtering_lower_threshold_pyspark(self):
+        exp = self.getExperiment()
+        input_data = self.spark.createDataFrame(self.data)
+        data = exp.outlier_filter(
+            input_data,
+            kpis=[KPI(kpi) for kpi in self.kpi_names],
+            thresholds={kpi: ('lower', 0.1) for kpi in self.kpi_names}
+        )
+        self.assertEqual(len(self.data) - data.count(), exp.metadata['filtered_entities_number'])
+        self.assertEqual(exp.metadata['filtered_entities_per_variant']['A'], 22)
+        self.assertEqual(exp.metadata['filtered_entities_per_variant']['B'], 18)
+
     def test_outlier_filtering_unsupported_kpi(self):
         exp = self.getExperiment()
         with self.assertRaises(KeyError):
             exp.outlier_filter(self.data, kpis=[KPI('revenue')])
+
+    def test_outlier_filtering_unsupported_kpi_pyspark(self):
+        exp = self.getExperiment()
+        input_data = self.spark.createDataFrame(self.data)
+        with self.assertRaises(KeyError):
+            exp.outlier_filter(input_data, kpis=[KPI('revenue')])
 
     def test_outlier_filtering_unsupported_percentile(self):
         exp = self.getExperiment()
@@ -339,11 +394,33 @@ class OutlierFilteringTestCases(ExperimentTestCase):
             exp.outlier_filter(self.data, kpis=[KPI('normal_same')],
                                thresholds = {'normal_same': ('upper', 101.0)})
 
+    def test_outlier_filtering_unsupported_percentile_pyspark(self):
+        exp = self.getExperiment()
+        input_data = self.spark.createDataFrame(self.data)
+        with self.assertRaises(ValueError):
+            exp.outlier_filter(
+                input_data,
+                kpis=[KPI('normal_same')],
+                thresholds={
+                    'normal_same': ('upper', 101.0)
+                }
+            )
+
     def test_outlier_filtering_unsupported_threshold_kind(self):
         exp = self.getExperiment()
         with self.assertRaises(ValueError):
             exp.outlier_filter(self.data, kpis=[KPI('normal_same')],
                                thresholds = {'normal_same': ('upppper', 99.0)})
+
+    def test_outlier_filtering_unsupported_threshold_kind_pyspark(self):
+        exp = self.getExperiment()
+        input_data = self.spark.createDataFrame(self.data)
+        with self.assertRaises(ValueError):
+            exp.outlier_filter(
+                input_data,
+                kpis=[KPI('normal_same')],
+                thresholds={'normal_same': ('upppper', 99.0)}
+            )
 
     def test_outlier_filtering_high_filtering_percentage(self):
         exp = self.getExperiment()
@@ -352,6 +429,18 @@ class OutlierFilteringTestCases(ExperimentTestCase):
                                thresholds = {'normal_same': ('upper', 97.9)})
             self.assertEqual(len(w), 1)
             self.assertTrue(issubclass(w[-1].category, UserWarning))
+
+    def test_outlier_filtering_high_filtering_percentage_pyspark(self):
+        exp = self.getExperiment()
+        with warnings.catch_warnings(record=True) as ws:
+            input_data = self.spark.createDataFrame(self.data)
+            exp.outlier_filter(
+                input_data,
+                kpis=[KPI('normal_same')],
+                thresholds={'normal_same': ('upper', 97.9)})
+            self.assertEqual(3, len(ws))
+            for w in ws:
+                self.assertTrue(issubclass(w.category, UserWarning))
 
     def test_outlier_filtering_derived_kpi(self):
         my_kpis=[
